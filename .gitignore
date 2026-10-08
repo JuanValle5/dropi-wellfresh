@@ -1,0 +1,20 @@
+# Configuración privada y credenciales
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+# Dependencias y salidas locales
+node_modules/
+artifacts/
+coverage/
+*.log
+.DS_Store
+# Investigación, manuales e imágenes originales (se conservan localmente)
+conocimiento/
+aura-dropshipping-portable/
+img/
+# Contexto de herramientas locales
+.agents/
+.codex/
+.aws/
