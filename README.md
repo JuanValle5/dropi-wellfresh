@@ -20,7 +20,7 @@ Luego abre http://localhost:4173/. Este servidor solo sirve archivos para vista 
 - `styles.css`
 - `script.js`
 - `favicon.svg`
-- `assets/` (dos imágenes WebP optimizadas)
+- `assets/` (imágenes WebP, poster y video MP4 optimizado)
 
 No se necesita un comando de build. En un hosting estático usa la raíz del repositorio como directorio público.
 
@@ -43,3 +43,5 @@ La integración anterior se conserva solo en el archivo local ignorado para refe
 ## Exclusiones
 
 `.gitignore` conserva fuera de GitHub credenciales, investigación y costos, manuales, imágenes originales y capturas locales.
+
+El video se reproduce con controles nativos, sin autoplay y con `preload="none"` para no descargarlo hasta que el visitante lo solicite. `assets/video.mp4` es el original local ignorado; se publica `assets/wellfresh-demo.mp4`.
