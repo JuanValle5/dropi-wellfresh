@@ -1,30 +1,36 @@
-# Activar el receptor de WellFresh
+# Actualizar el receptor de WellFresh
 
-El código ya contiene el ID de la hoja proporcionada por el usuario. El usuario desplegó el receptor y proporcionó su URL `/exec` el 2026-10-10; ya está configurada en sheets-config.js.
+La landing ya utiliza la URL `/exec` proporcionada el 2026-10-10. Este cambio requiere actualizar Apps Script: subir archivos a GitHub no cambia el receptor de Google.
 
-1. En la hoja, abrir **Extensiones → Apps Script**.
-2. Reemplazar todo el contenido de `Código.gs` por `Code.gs` de esta carpeta. Guardar.
-3. **Implementar → Nueva implementación → Aplicación web**.
-4. **Ejecutar como: Yo**. **Quién tiene acceso: Cualquier usuario** (incluidos usuarios no conectados, no solo usuarios de la organización).
-5. Implementar y autorizar con la cuenta propietaria de la hoja. Mantener privada la hoja: el acceso público es al receptor, no a los datos.
-6. Copiar la URL de aplicación web terminada en `/exec` y enviarla a este chat. No usar `/dev`.
+1. Abre la hoja de WellFresh → **Extensiones → Apps Script**.
+2. Reemplaza todo `Código.gs` por el contenido completo de `Code.gs` de esta carpeta y guarda.
+3. Selecciona **prepararHoja** y pulsa **Ejecutar**. Autoriza si Google lo solicita. Se utiliza el ID de la hoja de WellFresh configurado en el código.
+4. Abre **Implementar → Gestionar implementaciones → Editar (lápiz)** en la aplicación web existente.
+5. Selecciona **Nueva versión → Implementar**, conservando **Ejecutar como: Yo** y acceso **Cualquier usuario**. Así conservas la misma URL `/exec` y no necesitas cambiar la landing.
 
-No ejecutar `doPost` desde el editor: necesita los datos enviados por el formulario. El receptor crea su pestaña `Pedidos WellFresh` y las cabeceras al primer pedido válido sin borrar otras pestañas.
+No ejecutes `doPost` manualmente: requiere los datos del formulario. Mantén la hoja privada.
 
-## Activación de la landing
+## Formato de pedidos Aura
 
-Pegar la URL `/exec` en `sheets-config.js`. Para la prueba local usar `http://localhost:4173/`, no abrir con `file://`. El sitio sigue siendo estático, sin npm ni servidor de aplicación.
+Los nuevos pedidos se guardan en **Pedidos**, con estas columnas visibles:
 
-Cuando exista dominio público, añadir su origen exacto a `WF_ALLOWED_ORIGINS` en Apps Script y actualizar la implementación a una versión nueva. Actualmente se admite https://dropi-wellfresh.pages.dev y, para pruebas, localhost y 127.0.0.1 en puerto 4173. Cambiar precios exige actualizar el catálogo en `script.js` y `Code.gs` y desplegar de nuevo.
+Referencia · Fecha Colombia · Nombre · WhatsApp · Departamento · Municipio · Dirección · Combo · Contenido · Total COP · Envío COP · Recaudo COP · Pago · Estado.
 
-## Verificación pendiente
+- Individual: 1 frasco de 30 ml, **$59.900**.
+- Dúo: 2 frascos de 30 ml, **$89.900**.
+- Envío COP: **0** (cargo al comprador, no costo logístico interno).
+- Recaudo COP: **0** inicial, siguiendo el ejemplo aportado; es un campo operativo que puedes actualizar manualmente. No representa una integración de cobros ni descuenta automáticamente el total.
+- Pago: **Contra entrega**. Estado inicial: **Pendiente de contactar**.
+- Fecha en hora de Colombia (`America/Bogota`). No se habilita descuento de salida.
 
-Hacer un pedido claramente marcado PRUEBA NO DESPACHAR. Verificar una fila con el total correcto ($59.900 o $89.900, envío cero) y la misma referencia mostrada en pantalla. Reintentar la misma solicitud no debe duplicar la fila. Hasta comprobar la hoja real, la integración solo tiene pruebas con servicios simulados.
+Las columnas O/P (`request_id`, `fingerprint`) se ocultan al crear la pestaña. No las borres: evitan duplicados y detectan cambios en un reintento. Si ordenas filas, incluye también estas columnas.
 
-## Diseño
+La pestaña anterior **Pedidos WellFresh** permanece intacta. No se migran ni borran pedidos anteriores; el receptor también consulta sus referencias para evitar duplicarlos. Conserva su nombre y sus columnas. Si ya existe una pestaña **Pedidos** con otra estructura, la preparación se detiene sin sobrescribirla: renómbrala para conservarla y vuelve a ejecutar `prepararHoja`.
 
-POST de formulario a iframe oculto, respuesta HTML de Google y acuse `postMessage` al origen exacto de la landing. La landing exige origen de Google válido, nonce aleatorio por intento y referencia/oferta/total coincidentes. La carga del iframe no se interpreta como éxito. No usa fetch opaco ni expone secretos. Ante timeout mantiene datos y referencia; no recargar hasta aclarar si el pedido quedó registrado.
+## Confirmación y validación
 
-El receptor valida precios/campos, protege celdas contra fórmulas y bloquea escrituras concurrentes. La deduplicación usa referencia y huella del contenido. Hay límite básico por teléfono; el endpoint de compra es público y la lista de orígenes declarados no autentica ni evita por sí sola bots. Evaluar protección adicional si aparece abuso. Las funciones internas terminan en `_` para no exponerlas por google.script.run.
+Se conserva el contrato actual de la landing: POST a iframe oculto, acuse `wellfresh-order-result`, nonce y referencia/oferta/total coincidentes. Solo hay éxito después del guardado. Precios y campos se validan en el servidor; se mantiene bloqueo concurrente, huella del pedido, protección contra fórmulas y límite básico por teléfono.
 
-Fuente: [despliegue de aplicaciones web de Apps Script](https://developers.google.com/apps-script/guides/web).
+La versión anterior confirmó un pedido ficticio en producción el 2026-10-10. El nuevo formato requiere desplegar esta nueva versión antes de validarse en la hoja real. Los ensayos locales no equivalen a un despliegue en Google.
+
+Orígenes permitidos: https://dropi-wellfresh.pages.dev y localhost/127.0.0.1:4173. No hay cambios de endpoint ni de precios en la landing. La lista de orígenes declarados no autentica visitantes ni evita por sí sola bots.

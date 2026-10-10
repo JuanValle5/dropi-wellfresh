@@ -5,11 +5,44 @@ var WF_ALLOWED_ORIGINS = ['https://dropi-wellfresh.pages.dev', 'http://localhost
 /** WellFresh — receptor para Google Sheets. No se despliega automáticamente. */
 var WF_VERSION = 'wellfresh-2026-10-09-v2';
 var WF_CATALOG = {
-  single: { units: 1, product: 59900, shipping: 0, total: 59900 },
-  duo: { units: 2, product: 89900, shipping: 0, total: 89900 }
+  single: { name: 'WellFresh Individual', content: '1 frasco WellFresh de 30 ml con gotero', units: 1, product: 59900, shipping: 0, total: 59900 },
+  duo: { name: 'WellFresh Dúo', content: '2 frascos WellFresh de 30 ml cada uno con gotero', units: 2, product: 89900, shipping: 0, total: 89900 }
 };
 var WF_DEPARTMENTS = ['Amazonas','Antioquia','Arauca','Atlántico','Bogotá D. C.','Bolívar','Boyacá','Caldas','Caquetá','Casanare','Cauca','Cesar','Chocó','Córdoba','Cundinamarca','Guainía','Guaviare','Huila','La Guajira','Magdalena','Meta','Nariño','Norte de Santander','Putumayo','Quindío','Risaralda','San Andrés y Providencia','Santander','Sucre','Tolima','Valle del Cauca','Vaupés','Vichada'];
-var WF_HEADERS = ['request_id','fingerprint','referencia','fecha','oferta','unidades','producto_cop','envio_cop','total_cop','nombre','celular','departamento','municipio','direccion','estado'];
+// Las primeras 14 columnas siguen el formato operativo de Aura.
+// Las dos últimas son internas: conservarlas aunque se oculten.
+var WF_TAB = 'Pedidos';
+var WF_HEADERS = ['Referencia', 'Fecha Colombia', 'Nombre', 'WhatsApp', 'Departamento', 'Municipio', 'Dirección', 'Combo', 'Contenido', 'Total COP', 'Envío COP', 'Recaudo COP', 'Pago', 'Estado', 'request_id', 'fingerprint'];
+var WF_LEGACY_HEADERS = ['request_id','fingerprint','referencia','fecha','oferta','unidades','producto_cop','envio_cop','total_cop','nombre','celular','departamento','municipio','direccion','estado'];
+function wfSheet_(workbook) {
+  var sheet = workbook.getSheetByName(WF_TAB) || workbook.insertSheet(WF_TAB);
+  if (sheet.getLastRow() === 0) {
+    if (sheet.getMaxColumns() < WF_HEADERS.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), WF_HEADERS.length - sheet.getMaxColumns());
+    sheet.appendRow(WF_HEADERS);
+    sheet.getRange(1, 1, 1, WF_HEADERS.length).setFontWeight('bold').setBackground('#d1fae5');
+    sheet.setFrozenRows(1);
+    sheet.hideColumns(15, 2);
+  }
+  var headers = sheet.getRange(1, 1, 1, WF_HEADERS.length).getValues()[0];
+  if (JSON.stringify(headers) !== JSON.stringify(WF_HEADERS)) throw wfError_('SHEET_SCHEMA_MISMATCH', true);
+  return sheet;
+}
+// Ejecutar una vez antes de actualizar la implementación. No borra ni migra pedidos.
+function prepararHoja() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) throw new Error('Receptor ocupado. Reintenta.');
+  try {
+    wfSheet_(SpreadsheetApp.openById(WF_SHEET_ID));
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
+}
+function wfExisting_(sheet, order, fingerprint, idColumn, fingerprintColumn) {
+  if (!sheet || sheet.getLastRow() < 2) return false;
+  var found = sheet.getRange(2, idColumn, sheet.getLastRow() - 1, 1).createTextFinder(order.requestId).matchEntireCell(true).findNext();
+  if (!found) return false;
+  if (sheet.getRange(found.getRow(), fingerprintColumn).getValue() !== fingerprint) throw wfError_('IDEMPOTENCY_CONFLICT', true);
+  return true;
+}
 function wfError_(message, definitive) { var error = new Error(message); error.definitive = definitive; return error; }
 function wfValidate_(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw wfError_('INVALID_ORDER', true);
@@ -42,28 +75,25 @@ function wfSave_(raw, spreadsheetId) {
   if (!lock.tryLock(15000)) throw wfError_('BUSY_RETRY', false);
   try {
     var workbook = SpreadsheetApp.openById(spreadsheetId);
-    var sheet = workbook.getSheetByName('Pedidos WellFresh') || workbook.insertSheet('Pedidos WellFresh');
-    if (sheet.getLastRow() === 0) sheet.appendRow(WF_HEADERS);
-    var headers = sheet.getRange(1, 1, 1, WF_HEADERS.length).getValues()[0];
-    if (JSON.stringify(headers) !== JSON.stringify(WF_HEADERS)) throw wfError_('SHEET_SCHEMA_MISMATCH', true);
-    var last = sheet.getLastRow();
-    if (last > 1) {
-      var found = sheet.getRange(2, 1, last - 1, 1).createTextFinder(order.requestId).matchEntireCell(true).findNext();
-      if (found) {
-        var previous = sheet.getRange(found.getRow(), 2).getValue();
-        if (previous !== fingerprint) throw wfError_('IDEMPOTENCY_CONFLICT', true);
-        return wfReceipt_(order);
-      }
+    var sheet = wfSheet_(workbook);
+    if (wfExisting_(sheet, order, fingerprint, 15, 16)) return wfReceipt_(order);
+    // Evita duplicar solicitudes guardadas antes del cambio de formato.
+    var legacy = workbook.getSheetByName('Pedidos WellFresh');
+    if (legacy && legacy.getLastRow() > 0) {
+      if (JSON.stringify(legacy.getRange(1, 1, 1, WF_LEGACY_HEADERS.length).getValues()[0]) !== JSON.stringify(WF_LEGACY_HEADERS)) throw wfError_('LEGACY_SCHEMA_MISMATCH', true);
+      if (wfExisting_(legacy, order, fingerprint, 1, 2)) return wfReceipt_(order);
     }
     var cache = CacheService.getScriptCache();
     var rateKey = 'wf-phone-' + Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, order.phone));
     var attempts = Number(cache.get(rateKey) || 0);
     if (attempts >= 5) throw wfError_('RATE_LIMIT', true);
     cache.put(rateKey, String(attempts + 1), 3600);
+    var offer = WF_CATALOG[order.offerId];
     sheet.appendRow([
-      order.requestId, fingerprint, 'WF-' + order.requestId.toUpperCase(), new Date().toISOString(), order.offerId,
-      order.units, order.product, order.shipping, order.total, wfCell_(order.name), "'" + order.phone,
-      wfCell_(order.department), wfCell_(order.city), wfCell_(order.address), 'PENDIENTE DE CONFIRMAR'
+      'WF-' + order.requestId.toUpperCase(), Utilities.formatDate(new Date(), 'America/Bogota', 'yyyy-MM-dd HH:mm:ss'),
+      wfCell_(order.name), "'" + order.phone, wfCell_(order.department), wfCell_(order.city), wfCell_(order.address),
+      offer.name, offer.content, order.total, order.shipping, 0, 'Contra entrega', 'Pendiente de contactar',
+      order.requestId, fingerprint
     ]);
     SpreadsheetApp.flush();
     return wfReceipt_(order);
