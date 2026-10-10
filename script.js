@@ -1,5 +1,5 @@
 // Landing estática: sin Node, npm, módulos ni solicitudes a un servidor local.
-// La conexión a Google Sheets se configurará en el siguiente paso.
+// El endpoint público de Google se configura en sheets-config.js.
 (() => {
 const CATALOG_VERSION = 'wellfresh-2026-10-09-v2';
 const OFFERS = Object.freeze({
@@ -12,10 +12,10 @@ const DEPARTMENTS = ['Amazonas','Antioquia','Arauca','Atlántico','Bogotá D. C.
 const $ = selector => document.querySelector(selector);
 const checkout = $('#checkout'), form = $('#order-form'), privacy = $('#privacy');
 const submit = form.querySelector('[type=submit]');
-let openingButton = null;
+let openingButton = null, pendingOrder = null, sending = false, confirmed = false;
 for (const department of DEPARTMENTS) form.elements.department.add(new Option(department, department));
 function currentOffer() { return OFFERS[form.elements.offerId.value] || OFFERS.duo; }
-function buttonLabel() { submit.textContent = `Confirmar mi pedido · ${money(currentOffer().total)}`; }
+function buttonLabel() { submit.textContent = sending ? 'Registrando…' : pendingOrder ? 'Reintentar la misma solicitud' : `Confirmar mi pedido · ${money(currentOffer().total)}`; }
 function updateSummary(){
  const offer=currentOffer();
  $('#summary-label').textContent=`${offer.units} ${offer.units===1?'frasco':'frascos'} · 30 ml ${offer.units===1?'':'cada uno'}`;
@@ -26,7 +26,8 @@ function updateSummary(){
 }
 function openCheckout(event){
  openingButton=event.currentTarget;
- form.elements.offerId.value=openingButton.dataset.buy;updateSummary();
+ if(!pendingOrder && !confirmed) form.elements.offerId.value=openingButton.dataset.buy;
+ updateSummary();
  checkout.showModal();
  checkout.scrollTop=0;
 }
@@ -50,10 +51,65 @@ const support = document.createElement('a');
 support.href = supportURL; support.target = '_blank'; support.rel = 'noopener';
 support.textContent = 'WhatsApp de Aura: 316 095 8557';
 $('#privacy-contact').replaceChildren('Para consultas sobre tus datos o tu pedido: ', support, '.');
-form.addEventListener('submit', event => {
+function sendOrder(order) {
+  return new Promise((resolve, reject) => {
+    const endpoint = window.WELLFRESH_SHEETS_URL;
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(endpoint || '')) {
+      reject(new Error('Los pedidos aún no están habilitados. Puedes contactar a Aura por WhatsApp.')); return;
+    }
+    if (location.protocol !== 'https:' && !['http://localhost:4173','http://127.0.0.1:4173'].includes(location.origin)) {
+      reject(new Error('Abre la página desde su dirección web para confirmar tu pedido.')); return;
+    }
+    const nonce = crypto.randomUUID();
+    const frame = document.createElement('iframe');
+    frame.name = 'wf-' + nonce; frame.hidden = true; frame.title = 'Registro seguro del pedido';
+    const transport = document.createElement('form');
+    transport.method = 'POST'; transport.action = endpoint; transport.target = frame.name; transport.hidden = true;
+    const field = document.createElement('input');field.type = 'hidden';field.name = 'payload';
+    field.value = JSON.stringify({origin:location.origin,nonce,order});transport.append(field);
+    const cleanup = () => {clearTimeout(timer);window.removeEventListener('message',receive);transport.remove();frame.remove();};
+    const receive = event => {
+      const trustedOrigin = event.origin === 'https://script.googleusercontent.com' || /^https:\/\/[a-z0-9-]+-script\.googleusercontent\.com$/.test(event.origin);
+      const data = event.data;
+      if (!trustedOrigin || !data || data.type !== 'wellfresh-order-result' || data.nonce !== nonce) return;
+      const result = data.result;
+      if (!result || (result.ok !== true && result.ok !== false)) return;
+      if(result.ok && (result.requestId !== order.requestId || result.total !== order.total || result.offerId !== order.offerId || result.orderId !== 'WF-' + order.requestId.toUpperCase())) return;
+      cleanup();resolve(result);
+    };
+    const timer = setTimeout(() => {cleanup();reject(new Error('Aún no pudimos confirmar el registro. Reintenta con la misma referencia; no volveremos a crear el pedido si ya quedó guardado.'));},45000);
+    window.addEventListener('message',receive);
+    document.body.append(frame,transport);
+    transport.submit();
+  });
+}
+function lockOrder(locked) {
+  for (const field of form.querySelectorAll('input,select')) field.disabled = locked;
+  submit.disabled = sending || confirmed;
+  buttonLabel();
+}
+form.addEventListener('submit', async event => {
   event.preventDefault();
-  // No simular éxito ni enviar datos mientras no exista un receptor conectado.
-  $('#form-status').textContent = 'Los pedidos aún no están habilitados. Puedes contactar a Aura por WhatsApp.';
+  if(sending || confirmed) return;
+  if(!window.WELLFRESH_SHEETS_URL){$('#form-status').textContent='Los pedidos aún no están habilitados. Puedes contactar a Aura por WhatsApp.';return;}
+  if(location.protocol === 'file:'){$('#form-status').textContent='Abre la página desde su dirección web para confirmar tu pedido.';return;}
+  if(!pendingOrder){
+    const data = Object.fromEntries(new FormData(form));
+    const phone = data.phone.replace(/[\s()+-]/g,'').replace(/^57(?=3\d{9}$)/,'');
+    if(!/^3\d{9}$/.test(phone)){$('#form-status').textContent='Escribe un celular colombiano de 10 dígitos.';return;}
+    pendingOrder = {...data,phone,requestId:crypto.randomUUID(),catalogVersion:CATALOG_VERSION,total:currentOffer().total,promo:null};
+  }
+  sending = true;lockOrder(true);$('#form-status').textContent='Registrando tu solicitud…';
+  try{
+    const result = await sendOrder(pendingOrder);
+    if(!result.ok){if(result.definitive)pendingOrder=null;throw new Error(result.message || 'No pudimos confirmar el registro. Reintenta.');}
+    confirmed=true;
+    $('#receipt-id').textContent=result.orderId;
+    $('#receipt-total').textContent=money(result.total);
+    $('#checkout-content').hidden=true;$('#success').hidden=false;
+    checkout.scrollTop=0;$('#success').focus();
+  }catch(error){$('#form-status').textContent=error.message;}
+  finally{sending=false;lockOrder(!!pendingOrder);}
 });
 updateSummary();
 })();

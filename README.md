@@ -19,6 +19,7 @@ Luego abre http://localhost:4173/. Este servidor solo sirve archivos para vista 
 - `index.html`
 - `styles.css`
 - `script.js`
+- `sheets-config.js`
 - `favicon.svg`
 - `assets/` (imágenes WebP, poster y video MP4 optimizado)
 
@@ -36,9 +37,9 @@ El costo logístico de $18.000 lo asume la tienda; no se cobra al comprador.
 
 ## Google Sheets
 
-Pendiente de conexión en el siguiente paso. El formulario deja revisar ofertas y completar datos, pero no envía información ni simula confirmaciones exitosas. No requiere endpoints `/api` ni un servidor Node.
+Receptor preparado para la hoja indicada por el usuario en `google-apps-script/Code.gs`. URL `/exec` configurada el 2026-10-10; la validación real se registra en la ficha local. Pasos en `google-apps-script/ACTIVACION.md`.
 
-La integración anterior se conserva solo en el archivo local ignorado para referencia. No está activa ni debe desplegarse. La futura conexión estática deberá validar precios en el receptor, correlacionar el acuse con la solicitud y evitar duplicados; no bastará un envío opaco para mostrar éxito.
+Configurar el endpoint en `sheets-config.js`. La landing continúa estática y valida el acuse de Google antes de mostrar éxito. Los reintentos mantienen referencia y contenido para evitar duplicados. Mientras la URL esté vacía no se envían pedidos. Abrir por HTTP/HTTPS para enviar; `file://` solo permite revisar la landing.
 
 ## Exclusiones
 
