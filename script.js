@@ -45,12 +45,6 @@ $('#privacy-close').addEventListener('click',closePrivacy);backdropClose(privacy
 form.addEventListener('change',e=>{if(e.target.name==='offerId')updateSummary();});
 
 const supportURL = 'https://wa.me/573160958557';
-$('#support-link').href = supportURL;
-$('#support-link').hidden = false;
-const support = document.createElement('a');
-support.href = supportURL; support.target = '_blank'; support.rel = 'noopener';
-support.textContent = 'WhatsApp de Aura: 316 095 8557';
-$('#privacy-contact').replaceChildren('Para consultas sobre tus datos o tu pedido: ', support, '.');
 function sendOrder(order) {
   return new Promise((resolve, reject) => {
     const endpoint = window.WELLFRESH_SHEETS_URL;
@@ -106,6 +100,7 @@ form.addEventListener('submit', async event => {
     confirmed=true;
     $('#receipt-id').textContent=result.orderId;
     $('#receipt-total').textContent=money(result.total);
+    $('#order-whatsapp').href = supportURL + '?text=' + encodeURIComponent(`Hola, Aura. Quiero consultar mi pedido WellFresh ${result.orderId}, por ${money(result.total)}. Ya lo registré en la página.`);
     $('#checkout-content').hidden=true;$('#success').hidden=false;
     checkout.scrollTop=0;$('#success').focus();
   }catch(error){$('#form-status').textContent=error.message;}
